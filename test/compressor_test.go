@@ -508,28 +508,41 @@ func (s) TestClientSupportedCompressors(t *testing.T) {
 		},
 	} {
 		t.Run(tt.desc, func(t *testing.T) {
-			ss := &stubserver.StubServer{
-				EmptyCallF: func(ctx context.Context, _ *testpb.Empty) (*testpb.Empty, error) {
-					got, err := grpc.ClientSupportedCompressors(ctx)
+			for _, server := range []struct {
+				name  string
+				start func(*stubserver.StubServer, ...grpc.ServerOption) error
+			}{
+				{name: "Serve", start: (*stubserver.StubServer).StartServer},
+				{name: "ServeHTTP", start: (*stubserver.StubServer).StartHandlerServer},
+			} {
+				t.Run(server.name, func(t *testing.T) {
+					ss := &stubserver.StubServer{
+						EmptyCallF: func(ctx context.Context, _ *testpb.Empty) (*testpb.Empty, error) {
+							got, err := grpc.ClientSupportedCompressors(ctx)
+							if err != nil {
+								return nil, err
+							}
+
+							if !reflect.DeepEqual(got, tt.want) {
+								t.Errorf("unexpected client compressors got: %v, want: %v", got, tt.want)
+							}
+
+							return &testpb.Empty{}, nil
+						},
+					}
+					if err := server.start(ss); err != nil {
+						t.Fatalf("Error starting endpoint server: %v, want: nil", err)
+					}
+					defer ss.Stop()
+					if err := ss.StartClient(); err != nil {
+						t.Fatalf("Error starting client: %v", err)
+					}
+
+					_, err := ss.Client.EmptyCall(tt.ctx, &testpb.Empty{})
 					if err != nil {
-						return nil, err
+						t.Fatalf("Unexpected unary call error, got: %v, want: nil", err)
 					}
-
-					if !reflect.DeepEqual(got, tt.want) {
-						t.Errorf("unexpected client compressors got: %v, want: %v", got, tt.want)
-					}
-
-					return &testpb.Empty{}, nil
-				},
-			}
-			if err := ss.Start(nil); err != nil {
-				t.Fatalf("Error starting endpoint server: %v, want: nil", err)
-			}
-			defer ss.Stop()
-
-			_, err := ss.Client.EmptyCall(tt.ctx, &testpb.Empty{})
-			if err != nil {
-				t.Fatalf("Unexpected unary call error, got: %v, want: nil", err)
+				})
 			}
 		})
 	}

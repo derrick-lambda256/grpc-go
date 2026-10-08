@@ -95,18 +95,28 @@ func (s) TestSetSendCompressorSuccess(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Run("unary", func(t *testing.T) {
-				testUnarySetSendCompressorSuccess(t, tt.payload, tt.resCompressor, tt.wantCompressInvokes, tt.dialOpts)
-			})
+			for _, server := range []struct {
+				name  string
+				start func(*stubserver.StubServer, ...grpc.ServerOption) error
+			}{
+				{name: "Serve", start: (*stubserver.StubServer).StartServer},
+				{name: "ServeHTTP", start: (*stubserver.StubServer).StartHandlerServer},
+			} {
+				t.Run(server.name, func(t *testing.T) {
+					t.Run("unary", func(t *testing.T) {
+						testUnarySetSendCompressorSuccess(t, tt.payload, tt.resCompressor, tt.wantCompressInvokes, tt.dialOpts, server.start)
+					})
 
-			t.Run("stream", func(t *testing.T) {
-				testStreamSetSendCompressorSuccess(t, tt.payload, tt.resCompressor, tt.wantCompressInvokes, tt.dialOpts)
-			})
+					t.Run("stream", func(t *testing.T) {
+						testStreamSetSendCompressorSuccess(t, tt.payload, tt.resCompressor, tt.wantCompressInvokes, tt.dialOpts, server.start)
+					})
+				})
+			}
 		})
 	}
 }
 
-func testUnarySetSendCompressorSuccess(t *testing.T, payload *testpb.Payload, resCompressor string, wantCompressInvokes int32, dialOpts []grpc.DialOption) {
+func testUnarySetSendCompressorSuccess(t *testing.T, payload *testpb.Payload, resCompressor string, wantCompressInvokes int32, dialOpts []grpc.DialOption, start func(*stubserver.StubServer, ...grpc.ServerOption) error) {
 	wc := setupGzipWrapCompressor(t)
 	ss := &stubserver.StubServer{
 		UnaryCallF: func(ctx context.Context, _ *testpb.SimpleRequest) (*testpb.SimpleResponse, error) {
@@ -118,10 +128,13 @@ func testUnarySetSendCompressorSuccess(t *testing.T, payload *testpb.Payload, re
 			}, nil
 		},
 	}
-	if err := ss.Start(nil, dialOpts...); err != nil {
+	if err := start(ss); err != nil {
 		t.Fatalf("Error starting endpoint server: %v", err)
 	}
 	defer ss.Stop()
+	if err := ss.StartClient(dialOpts...); err != nil {
+		t.Fatalf("Error starting client: %v", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTestTimeout)
 	defer cancel()
@@ -136,7 +149,7 @@ func testUnarySetSendCompressorSuccess(t *testing.T, payload *testpb.Payload, re
 	}
 }
 
-func testStreamSetSendCompressorSuccess(t *testing.T, payload *testpb.Payload, resCompressor string, wantCompressInvokes int32, dialOpts []grpc.DialOption) {
+func testStreamSetSendCompressorSuccess(t *testing.T, payload *testpb.Payload, resCompressor string, wantCompressInvokes int32, dialOpts []grpc.DialOption, start func(*stubserver.StubServer, ...grpc.ServerOption) error) {
 	wc := setupGzipWrapCompressor(t)
 	ss := &stubserver.StubServer{
 		FullDuplexCallF: func(stream testgrpc.TestService_FullDuplexCallServer) error {
@@ -153,10 +166,13 @@ func testStreamSetSendCompressorSuccess(t *testing.T, payload *testpb.Payload, r
 			})
 		},
 	}
-	if err := ss.Start(nil, dialOpts...); err != nil {
+	if err := start(ss); err != nil {
 		t.Fatalf("Error starting endpoint server: %v", err)
 	}
 	defer ss.Stop()
+	if err := ss.StartClient(dialOpts...); err != nil {
+		t.Fatalf("Error starting client: %v", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTestTimeout)
 	defer cancel()
